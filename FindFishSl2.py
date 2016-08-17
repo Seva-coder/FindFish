@@ -82,42 +82,64 @@ def get_byte(start, shifting, quantity, forma): #вытащить из бина�
     temp = file.read(quantity)
     return struct.unpack(forma, temp)[0]
 
-#-------------MAIN!------------------#
+#---------------MAIN!------------------#
 gpx = ET.Element("gpx") # рутовый элемент XML'ки
 file = open(sl2_path, mode='rb')
-starting = 12
-
-lon1 = conv_lon(int(get_byte(starting, 104, 4, "<I")))
-lat1 = conv_lat(int(get_byte(starting, 108, 4, "<I")))
-depth1 = float(get_byte(starting, 60, 4, "<f")) * 0.3048
-
-counter = 0
-depth = []
-full_count = 0
-for starting in range(12, os.path.getsize(sl2_path), 2064):
-    depth.append(float(get_byte(starting, 60, 4, "<f")) * 0.3048) #глубины для картинки
-    full_count += 1
+depth = []  #для передачи графопостроителю
+step_coord = []  #пары координат с нужным рассстоянием
+delta_depth = []  #список с перепадами, синхр с координатми
+na_svale = False
+start, stop, count1, count2, numb = 0, 0, 0, 0, 0
+size = os.path.getsize(sl2_path)
+for starting in range(12, size, 2064):
+    depth.append(float(get_byte(starting, 60, 4, "<f")) * 0.3048)
+    count1 += 1  #инкременируем номер первой точки
     valid = int(get_byte(starting, 128, 2, ">H"))  #считали битовую маску
-    if valid & 0b0001000000000000: #позиция валидна
-        lat2 = conv_lat(int(get_byte(starting, 108, 4, "<I")))
-        lon2 = conv_lon(int(get_byte(starting, 104, 4, "<I")))
-        depth2 = float(get_byte(starting, 60, 4, "<f")) * 0.3048  #перевели в метры
+    if not valid & 0b0001000000000000:  #позиция вруг не валидна
+        continue
+    for y in range(starting, size, 2064):
+        count2 += 1  #смещение от первого номера (основного)
+        valid = int(get_byte(y, 128, 2, ">H"))
+        if not valid & 0b0001000000000000:
+            continue
+        lat1 = conv_lat(int(get_byte(starting, 108, 4, "<I")))
+        lon1 = conv_lon(int(get_byte(starting, 104, 4, "<I")))
+        lat2 = conv_lat(int(get_byte(y, 108, 4, "<I")))
+        lon2 = conv_lon(int(get_byte(y, 104, 4, "<I")))
         dlin = L(lat1, lon1, lat2, lon2)
-        if dlin > STEP_HORIZ and abs(depth1 - depth2) > STEP_DEEP:
-            counter += 1  #счётчик перепадов
-            write_point(lat1 * (180/math.pi), lon1 * (180/math.pi), depth1,
-                        "Garmin/images/" + str(round(full_count / 2)) + ".jpg")
-            write_point(lat2 * (180/math.pi), lon2 * (180/math.pi), depth2,
-                        "Garmin/images/" + str(round(full_count / 2)) + ".jpg")
-            lat1, lon1, depth1 = lat2, lon2, depth2
-            #передаём глубины через одну и делим имя, тк значения повторяются
-            made_graph(depth[0::2], round(full_count / 2))
-            depth.clear()
-        elif dlin > STEP_HORIZ:
-            lat1, lon1, depth1 = lat2, lon2, depth2
-            depth.clear()
+        if dlin > STEP_HORIZ:
+            depth1 = float(get_byte(starting, 60, 4, "<f")) * 0.3048
+            depth2 = float(get_byte(y, 60, 4, "<f")) * 0.3048
+            step_coord.append(list((lat1, lon1, count1 - 1, lat2, lon2, count2 - 1)))
+            delta_depth.append(abs(depth1 - depth2))
+            break
+    count2 = 0
+print("теперь ищем")
+for position in range(len(delta_depth)):
+    if delta_depth[position] > STEP_DEEP:
+        if not na_svale:
+            start = position
+            na_svale = True
+    else:
+        if na_svale:  #свал закончился
+            stop = position
+            maxx = max(delta_depth[start:stop])
+            yama_index = delta_depth.index(maxx, start, stop)
+            lat1 = step_coord[yama_index][0]
+            lon1 = step_coord[yama_index][1]
+            count1 = step_coord[yama_index][2]
+            lat2 = step_coord[yama_index][3]
+            lon2 = step_coord[yama_index][4]
+            count2 = step_coord[yama_index][5]
+            depth1 = depth[count1]
+            depth2 = depth[count1 + count2]
+            made_graph(depth[count1:count1 + count2:2], round(count1/2))
+            write_point(lat1 * (180/math.pi), lon1 * (180/math.pi), depth1, "Garmin/images/" + str(round(count1/2)) + ".jpg")
+            write_point(lat2 * (180/math.pi), lon2 * (180/math.pi), depth2, "Garmin/images/" + str(round((count1 + count2)/2)) + ".jpg")
+            numb += 1
+            na_svale = False
 
 xmlstr = minidom.parseString(ET.tostring(gpx)).toprettyxml(indent="   ")
 with open("map.gpx", "w") as f:
     f.write(xmlstr)
-print("Усё готово! Обнаружено " + str(counter) + " рыбных мест!")
+print("Усё готово! Обнаружено " + str(numb) + " рыбных мест!")

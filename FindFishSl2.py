@@ -6,11 +6,12 @@ import matplotlib.pyplot as plt
 import matplotlib as mpl
 from PIL import Image
 import os
+import io
 
 POLAR_EARTH_RADIUS = 6356752.3142
 STEP_HORIZ = 3
-STEP_DEEP = 1
-sl2_path = "/Users/test/Documents/численные/new/логи эхолота сонара/долгобродское/Chart 11_07_2016 [1].sl2"
+STEP_DEEP = 1.5
+sl2_path = "/Users/test/Documents/численные/new/логи эхолота сонара/увильды/Chart 14_08_2016 [0].sl2"
 
 def L(lat1, lon1, lat2, lon2):
     #rad - радиус сферы (Земли)
@@ -56,27 +57,23 @@ def write_point(lat,lon,deep,path):
 
 def made_graph(deepth, number):
     deepth = [-x for x in deepth]
-
     plt.figure(figsize=(3.2, 4.8)) #размер картинки 320х480
     plt.axis([0, len(deepth)-1, min(deepth),0]) #автонастройка осей
-
     plt.fill_between(range(len(deepth)), deepth, y2=min(deepth),
                      facecolor=(0.302, 0.212, 0.196), edgecolor="red")
-
     ax = plt.gca()
     ax.set_axis_bgcolor((0.573, 0.757, 0.992)) #синий фон
-
     # Создаем форматер
     formatter = mpl.ticker.NullFormatter()
     # Установка форматера для оси X
     ax.xaxis.set_major_formatter (formatter) #уборка нижней оси
     locator = mpl.ticker.NullLocator()
     ax.xaxis.set_major_locator (locator) #уборка нижних тиков
-    plt.savefig("example.png")
-    Image.open('example.png').save(str(number) + ".jpg", 'JPEG')
-    path = os.path.join(os.path.abspath(os.path.dirname(__file__)), 'example.png')
-    os.remove(path)  #убрали png
-
+    tempfile = io.BytesIO()
+    plt.savefig(tempfile)
+    Image.open(tempfile).save(str(number) + ".jpg", 'JPEG')
+    tempfile.close()
+    
 def get_byte(start, shifting, quantity, forma): #вытащить из бинаря
     file.seek(start + shifting)
     temp = file.read(quantity)
@@ -95,12 +92,12 @@ for starting in range(12, size, 2064):
     depth.append(float(get_byte(starting, 60, 4, "<f")) * 0.3048)
     count1 += 1  #инкременируем номер первой точки
     valid = int(get_byte(starting, 128, 2, ">H"))  #считали битовую маску
-    if not valid & 0b0001000000000000:  #позиция вруг не валидна
+    if not (valid & 0b0001000000000000 and valid & 0b0000100000000000):  #позиция вруг не валидна
         continue
     for y in range(starting, size, 2064):
         count2 += 1  #смещение от первого номера (основного)
         valid = int(get_byte(y, 128, 2, ">H"))
-        if not valid & 0b0001000000000000:
+        if not (valid & 0b0001000000000000 and valid & 0b0000100000000000):
             continue
         lat1 = conv_lat(int(get_byte(starting, 108, 4, "<I")))
         lon1 = conv_lon(int(get_byte(starting, 104, 4, "<I")))
@@ -135,7 +132,7 @@ for position in range(len(delta_depth)):
             depth2 = depth[count1 + count2]
             made_graph(depth[count1:count1 + count2:2], round(count1/2))
             write_point(lat1 * (180/math.pi), lon1 * (180/math.pi), depth1, "Garmin/images/" + str(round(count1/2)) + ".jpg")
-            write_point(lat2 * (180/math.pi), lon2 * (180/math.pi), depth2, "Garmin/images/" + str(round((count1 + count2)/2)) + ".jpg")
+            write_point(lat2 * (180/math.pi), lon2 * (180/math.pi), depth2, "Garmin/images/" + str(round(count1/2)) + ".jpg")
             numb += 1
             na_svale = False
 xmlstr = minidom.parseString(ET.tostring(gpx)).toprettyxml(indent="   ")
